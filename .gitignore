@@ -154,4 +154,5 @@ cython_debug/
 Thumbs.db
 backend/.devcontainer/devcontainer.json
 backend/dev-requirements.txt
+CivicPulse-AI-Powered-Public-Service-Feedback-Analyzer.pptx.pdf
 frontend/node_modules
