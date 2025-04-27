@@ -154,3 +154,4 @@ cython_debug/
 Thumbs.db
 backend/.devcontainer/devcontainer.json
 backend/dev-requirements.txt
+frontend/node_modules
