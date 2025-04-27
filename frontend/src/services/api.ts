@@ -36,3 +36,34 @@ export const fetchSentimentData = async (
     };
   }
 };
+
+/**
+ * Fetches tweets with priority_score less than the given threshold from FastAPI backend
+ * 
+ * @param priorityThreshold - The slider value to filter results (returns tweets with priority_score < this value)
+ * @returns Promise with filtered tweet data
+ */
+export const fetchFilteredTweets = async (
+  priorityThreshold: number
+): Promise<ApiResponse> => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/filter`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        priority_threshold: priorityThreshold
+      })
+    });
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    console.error('Error fetching filtered tweets:', error);
+    return {
+      success: false,
+      message: 'Failed to fetch filtered tweets. Please try again later.',
+      data: []
+    };
+  }
+};

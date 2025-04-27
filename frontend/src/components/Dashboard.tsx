@@ -21,14 +21,13 @@ const Dashboard: React.FC = () => {
   // Fetch data when hashtag or priority changes
   useEffect(() => {
     const fetchData = async () => {
-      if (!hashtag) return;
-      
+      // Always fetch, even if hashtag is empty (to support /filter)
       setIsLoading(true);
       setError(null);
-      
+
       try {
         const result = await fetchSentimentData(hashtag, priorityThreshold);
-        
+
         if (result.success) {
           setData(result.data);
         } else {
@@ -41,7 +40,7 @@ const Dashboard: React.FC = () => {
         setIsLoading(false);
       }
     };
-    
+
     fetchData();
   }, [hashtag, priorityThreshold]);
 
@@ -126,7 +125,7 @@ const Dashboard: React.FC = () => {
               <div className="w-12 h-12 border-4 border-primary-200 border-t-primary-600 rounded-full animate-spin"></div>
             </div>
           ) : (
-            hashtag && data.length > 0 && (
+            data.length > 0 && (
               <>
                 <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
                   <div className="md:w-1/3">
@@ -152,25 +151,31 @@ const Dashboard: React.FC = () => {
               </>
             )
           )}
-          
-          {!isLoading && hashtag && data.length === 0 && (
+
+          {!isLoading && data.length === 0 && (
             <motion.div 
               className="text-center py-20 bg-neutral-50 rounded-lg"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
             >
-              <p className="text-neutral-500">No data found for #{hashtag} with the current priority threshold.</p>
-              <p className="text-neutral-400 text-sm mt-2">Try lowering the priority threshold or searching for a different hashtag.</p>
+              <p className="text-neutral-500">
+                {hashtag
+                  ? `No data found for #${hashtag} with the current priority threshold.`
+                  : 'No data found for the current priority threshold.'}
+              </p>
+              <p className="text-neutral-400 text-sm mt-2">
+                Try lowering the priority threshold or searching for a different hashtag.
+              </p>
             </motion.div>
           )}
-          
-          {!isLoading && !hashtag && (
+
+          {!isLoading && !hashtag && data.length === 0 && (
             <motion.div 
               className="text-center py-20 bg-neutral-50 rounded-lg"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
             >
-              <p className="text-neutral-500">Enter a hashtag above to start tracking sentiment data.</p>
+              <p className="text-neutral-500">Enter a hashtag above to start tracking sentiment data or adjust the priority threshold to filter all data.</p>
               <p className="text-neutral-400 text-sm mt-2">Try topics like technology, climate, politics, or sports.</p>
             </motion.div>
           )}
