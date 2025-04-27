@@ -15,7 +15,7 @@ from sentiment_module import analyze_feedback
 import re # Import re for regex matching
 import json
 import random
-
+from hashtagger import scrape_tweets
 load_dotenv()
 
 # Get the password from the environment variables
@@ -44,145 +44,88 @@ analysis_collection = db["analysis"] # Collection for analysis results
 class SearchRequest(BaseModel):
     hashtags: List[str]
     priority_threshold: int
-        
-# Dummy function to "scrape" tweets
-def scrape_tweets(hashtag):
-    """
-    Simulates scraping tweets for a given hashtag and saves them to scrape.json
-    
-    Args:
-        hashtag: The hashtag to search for
-        
-    Returns:
-        List of tweets matching the hashtag
-    """
-    # Sample tweet template
-    tweet_template = {
-        "created_at": "Sun Apr 27 02:30:12 +0000 2025",
-        "attached_urls": [],
-        "attached_media": None,
-        "tagged_users": [],
-        "tagged_hashtags": [],
-        "favorite_count": 0,
-        "reply_count": 1,
-        "retweet_count": 0,
-        "text": "",
-        "language": "en",
-        "user_id": "2280013318",
-        "id": "",
-        "conversation_id": "1916318890554232972",
-        "views": str(random.randint(10, 1000)),
-        "user": {
-            "id": None,
-            "name": "Twitter User",
-            "screen_name": f"user{random.randint(1000, 9999)}",
-            "description": "",
-            "followers_count": random.randint(100, 5000),
-            "friends_count": random.randint(100, 500),
-            "statuses_count": random.randint(500, 10000),
-            "verified": random.choice([True, False]),
-            "profile_image_url": "https://pbs.twimg.com/profile_images/default_normal.jpeg"
-        }
-    }
-    
-    # Generate sample tweet texts
-    sample_texts = [
-        f"The issue with {hashtag.strip('#')} is getting worse every day. Someone needs to look into this urgently!",
-        f"I'm really happy with the improvements in {hashtag.strip('#')} services recently. Great job!",
-        f"Can anyone help with the {hashtag.strip('#')} situation in my neighborhood? It's been days and no resolution.",
-        f"The local government needs to address {hashtag.strip('#')} issues immediately. This is unacceptable!",
-        f"I've noticed some improvements in {hashtag.strip('#')}, but there's still a long way to go."
-    ]
-    
-    # Generate 3-5 dummy tweets for the hashtag
-    num_tweets = random.randint(3, 5)
-    tweets = []
-    
-    for i in range(num_tweets):
-        tweet = tweet_template.copy()
-        tweet["user"] = tweet_template["user"].copy()  # Create a copy of the user dict
-        
-        # Set unique values
-        tweet["id"] = f"{random.randint(1000000000000000000, 9999999999999999999)}"
-        tweet["text"] = sample_texts[i % len(sample_texts)]
-        tweet["tagged_hashtags"] = [hashtag.strip('#')]
-        
-        tweets.append(tweet)
-    
-    # Save all tweets to scrape.json (append to any existing ones)
-    try:
-        try:
-            with open('scrape.json', 'r') as f:
-                existing_data = json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
-            existing_data = []
-            
-        # Add new tweets
-        existing_data.extend(tweets)
-        
-        # Write back to file
-        with open('scrape.json', 'w') as f:
-            json.dump(existing_data, f, indent=2)
-    except Exception as e:
-        print(f"Error saving to scrape.json: {e}")
-    
-    return tweets
 
 # Updated search route to scrape tweets and store them
 @app.post("/search")
-def search(request: SearchRequest):
+async def search(request: SearchRequest):
+    print("Search endpoint accessed")
     # Log the request
     timestamp = datetime.now(timezone.utc)
     log_entry = {
         "timestamp": timestamp,
         "event": "Search endpoint accessed",
-        "request_body": request.model_dump_json() # Log the request payload
+        "request_body": request.model_dump_json()  # Log the request payload
     }
     logs_collection.insert_one(log_entry)
+    print("Request logged in logs_collection")
 
     results_data = []
-    result_counter = 0 # Counter for unique IDs
+    print("Initialized results_data")
 
     # Process each hashtag
     for hashtag in request.hashtags:
-        # Ensure hashtag starts with # for query, remove if already present
-        query_tag = hashtag if hashtag.startswith('#') else '#' + hashtag
-        clean_tag = hashtag.strip('#').lower()
-        
-        # Query the analysis collection for documents where the 'keywords' array contains the clean_tag
-        analysis_results = list(analysis_collection.find({"keywords": clean_tag}))
+        print(f"Processing hashtag: {hashtag}")
+        try:
+            # Scrape tweets for the hashtag
+            tweets = await scrape_tweets(hashtag)
+            print(f"Scraped {len(tweets)} tweets for hashtag: {hashtag}")
 
-        print(analysis_results) # Debugging line to check the analysis results
-    # Process each found analysis document
-        for analysis_item in analysis_results:
-            # Check if priority score meets the threshold
-            if analysis_item.get('priority_score', 0) >= request.priority_threshold:
-            # Ensure timestamp is timezone-aware and format it
-                analysis_timestamp = analysis_item.get('timestamp', datetime.now(timezone.utc))
-                if isinstance(analysis_timestamp, datetime):
-                    if analysis_timestamp.tzinfo is None:
-                        analysis_timestamp = analysis_timestamp.replace(tzinfo=timezone.utc)
-                timestamp_str = analysis_timestamp.isoformat()
-            else:
-                # Handle cases where timestamp might not be a datetime object (fallback)
-                timestamp_str = datetime.now(timezone.utc).isoformat()
+            # Process each tweet
+            for tweet in tweets:
+                print(f"Processing tweet: {tweet.get('id', 'unknown')}")
+                # Extract tweet text
+                tweet_text = tweet.get("text", "")
+                if not tweet_text:
+                    print("Tweet text is empty, skipping")
+                    continue
 
-            # Format result for response
-            result_item = {
-                "id": f"{clean_tag}-{result_counter}", # Use counter for unique ID in response
-                "hashtag": query_tag,
-                "sentiment": analysis_item.get('sentiment'),
-                "urgency": analysis_item.get('urgency'),
-                "urgency_reason": analysis_item.get('urgency_reason'),
-                "topic": analysis_item.get('topic'),
-                "topic_scores": analysis_item.get('topic_scores', []), # Use existing scores
-                "priority_score": analysis_item.get('priority_score', 0),
-                "timestamp": timestamp_str
-            # "tweet_id": analysis_item.get('tweet_id') # Optionally include tweet_id if needed
+                # Analyze the tweet text
+                analysis = analyze_feedback(tweet_text)
+                print(f"Analysis result: {analysis}")
+
+                # Create document for MongoDB insertion
+                tweet_doc = {
+                    "keywords": tweet.get("tagged_hashtags", []),
+                    "sentiment": analysis["sentiment"],
+                    "urgency": analysis["urgency"],
+                    "urgency_reason": analysis["urgency_reason"],
+                    "topic": analysis["topic"],
+                    "topic_scores": [
+                        {"name": topic, "score": score}
+                        for topic, score in analysis["topic_scores"].items()
+                    ] if isinstance(analysis["topic_scores"], dict) else analysis["topic_scores"],
+                    "priority_score": analysis["priority_score"],
+                    "timestamp": datetime.strptime(tweet.get("created_at", timestamp.isoformat()),
+                                                   "%a %b %d %H:%M:%S %z %Y")
+                    if "created_at" in tweet else timestamp,
+                    "tweet_id": tweet.get("id", ""),
+                    "text": tweet_text  # Store the original tweet text
+                }
+                print(f"Prepared tweet_doc: {tweet_doc}")
+
+                # Insert into MongoDB
+                result = tweets_collection.insert_one(tweet_doc)
+                print(f"Inserted tweet into tweets_collection with ID: {result.inserted_id}")
+
+                # Add to results if it meets the priority threshold
+                if tweet_doc["priority_score"] >= request.priority_threshold:
+                    tweet_doc["_id"] = str(result.inserted_id)
+                    results_data.append(tweet_doc)
+                    print(f"Tweet added to results_data: {tweet_doc}")
+
+        except Exception as e:
+            print(f"Error processing hashtag {hashtag}: {str(e)}")
+            # Log the error
+            error_log = {
+                "timestamp": datetime.now(timezone.utc),
+                "event": "Search error",
+                "hashtag": hashtag,
+                "error": str(e)
             }
-            results_data.append(result_item)
-            result_counter += 1
+            logs_collection.insert_one(error_log)
+            print(f"Error logged in logs_collection: {error_log}")
 
+    print("Search completed, returning results")
     return {"success": True, "data": results_data}
 
 # Route to filter tweets based on priority_threshold
