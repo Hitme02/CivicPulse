@@ -34,7 +34,7 @@ app.add_middleware(
 )
 
 # MongoDB setup
-client = MongoClient(f"mongodb+srv://admin:{password}@tweets.ahxnyu0.mongodb.net/?retryWrites=true&w=majority&appName=tweets") # Replace with your MongoDB connection string if needed
+client = MongoClient(f"mongodb+srv://admin:{os.getenv('PASSWORD')}@civicpulse.cwyk8qt.mongodb.net/?retryWrites=true&w=majority&appName=civicpulse") # Replace with your MongoDB connection string if needed
 db = client["sample_mflix"] # Database name - TODO: Consider renaming db if not using sample_mflix
 tweets_collection = db["tweets"] # Collection name - TODO: Ensure this collection exists and has tweet data
 logs_collection = db["logs"] # Collection name for logs
@@ -44,16 +44,6 @@ analysis_collection = db["analysis"] # Collection for analysis results
 class SearchRequest(BaseModel):
     hashtags: List[str]
     priority_threshold: int
-
-# Helper function to parse Twitter timestamp
-def parse_twitter_timestamp(timestamp_str):
-    try:
-        # Parse Twitter's timestamp format
-        dt = datetime.strptime(timestamp_str, "%a %b %d %H:%M:%S %z %Y")
-        return dt
-    except Exception as e:
-        print(f"Error parsing timestamp: {e}")
-        return datetime.now(timezone.utc)
         
 # Dummy function to "scrape" tweets
 def scrape_tweets(hashtag):
@@ -159,94 +149,39 @@ def search(request: SearchRequest):
         query_tag = hashtag if hashtag.startswith('#') else '#' + hashtag
         clean_tag = hashtag.strip('#').lower()
         
-        # Scrape tweets for this hashtag
-        scraped_tweets = scrape_tweets(query_tag)
-        
-        # Process and store each scraped tweet
-        for tweet in scraped_tweets:
-            # Parse the created_at timestamp
-            tweet_timestamp = parse_twitter_timestamp(tweet["created_at"])
-            
-            # Store tweet in tweets collection
-            tweet_doc = {
-                "keyword": clean_tag,
-                "tweets": {
-                    "timestamp": tweet_timestamp,
-                    "text": tweet["text"],
-                    "favourite_count": tweet["favorite_count"],
-                    "id": tweet["id"],
-                    "retweet_count": tweet["retweet_count"],
-                    "follower_count": tweet["user"]["followers_count"] if "followers_count" in tweet["user"] else 0,
-                    "verified": tweet["user"]["verified"] if "verified" in tweet["user"] else False
-                }
-            }
-            tweets_collection.insert_one(tweet_doc)
-            
-            # Analyze the tweet
-            analysis = analyze_feedback(tweet["text"])
-            
-            # Format topic scores
-            formatted_topic_scores = [
-                {"name": topic, "score": round(score * 100)}
-                for topic, score in analysis.get('topic_scores', {}).items()
-            ]
-            
-            # Sort topic scores descending
-            formatted_topic_scores.sort(key=lambda x: x['score'], reverse=True)
-            
-            # Store analysis
-            analysis_doc = {
-                "keyword": clean_tag,
-                "sentiment": analysis['sentiment'],
-                "urgency": analysis['urgency'],
-                "urgency_reason": analysis['urgency_reason'],
-                "topic": analysis['topic'],
-                "topic_scores": formatted_topic_scores,
-                "priority_score": analysis['priority_score'],
-                "timestamp": tweet_timestamp,
-                "tweet_id": tweet["id"]
-            }
-            analysis_collection.insert_one(analysis_doc)
-            
+        # Query the analysis collection for documents where the 'keywords' array contains the clean_tag
+        analysis_results = list(analysis_collection.find({"keywords": clean_tag}))
+
+        print(analysis_results) # Debugging line to check the analysis results
+    # Process each found analysis document
+        for analysis_item in analysis_results:
             # Check if priority score meets the threshold
-            if analysis['priority_score'] >= request.priority_threshold:
-                # Format result for response
-                result_item = {
-                    "id": f"{clean_tag}-{result_counter}",
-                    "hashtag": query_tag,
-                    "sentiment": analysis['sentiment'],
-                    "urgency": analysis['urgency'],
-                    "urgency_reason": analysis['urgency_reason'],
-                    "topic": analysis['topic'],
-                    "topic_scores": formatted_topic_scores,
-                    "priority_score": analysis['priority_score'],
-                    "timestamp": tweet_timestamp.isoformat()
-                }
-                results_data.append(result_item)
-                result_counter += 1
-        
-        # Also check for existing analysis in the database
-        stored_analysis = list(analysis_collection.find({"keyword": clean_tag}))
-        
-        for analysis_item in stored_analysis:
-            # Check if priority score meets the threshold and not already included
             if analysis_item.get('priority_score', 0) >= request.priority_threshold:
-                # Check if we already included this tweet
-                tweet_id = analysis_item.get('tweet_id')
-                if not any(item['id'].endswith(str(tweet_id)) for item in results_data):
-                    result_item = {
-                        "id": f"{clean_tag}-stored-{result_counter}",
-                        "hashtag": query_tag,
-                        "sentiment": analysis_item.get('sentiment'),
-                        "urgency": analysis_item.get('urgency'),
-                        "urgency_reason": analysis_item.get('urgency_reason'),
-                        "topic": analysis_item.get('topic'),
-                        "topic_scores": analysis_item.get('topic_scores', []),
-                        "priority_score": analysis_item.get('priority_score', 0),
-                        "timestamp": analysis_item.get('timestamp', datetime.now(timezone.utc)).isoformat()
-                    }
-                    results_data.append(result_item)
-                    result_counter += 1
+            # Ensure timestamp is timezone-aware and format it
+                analysis_timestamp = analysis_item.get('timestamp', datetime.now(timezone.utc))
+                if isinstance(analysis_timestamp, datetime):
+                    if analysis_timestamp.tzinfo is None:
+                        analysis_timestamp = analysis_timestamp.replace(tzinfo=timezone.utc)
+                timestamp_str = analysis_timestamp.isoformat()
+            else:
+                # Handle cases where timestamp might not be a datetime object (fallback)
+                timestamp_str = datetime.now(timezone.utc).isoformat()
+
+            # Format result for response
+            result_item = {
+                "id": f"{clean_tag}-{result_counter}", # Use counter for unique ID in response
+                "hashtag": query_tag,
+                "sentiment": analysis_item.get('sentiment'),
+                "urgency": analysis_item.get('urgency'),
+                "urgency_reason": analysis_item.get('urgency_reason'),
+                "topic": analysis_item.get('topic'),
+                "topic_scores": analysis_item.get('topic_scores', []), # Use existing scores
+                "priority_score": analysis_item.get('priority_score', 0),
+                "timestamp": timestamp_str
+            # "tweet_id": analysis_item.get('tweet_id') # Optionally include tweet_id if needed
+            }
+            results_data.append(result_item)
+            result_counter += 1
 
     return {"success": True, "data": results_data}
 
@@ -289,5 +224,6 @@ def filter_tweets(payload: dict):
     return {"success": True, "data": results_data}
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8080)
+    # Use string "main:app" and add reload=True for auto-reloading on code changes
+    uvicorn.run("main:app", host="0.0.0.0", port=8080, reload=True)
 
