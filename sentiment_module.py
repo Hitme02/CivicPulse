@@ -3,6 +3,9 @@ from transformers import pipeline, MarianMTModel, MarianTokenizer
 from langdetect import detect
 import torch
 import re
+import nltk
+
+nltk.download('vader_lexicon')
 
 # Debug toggle
 DEBUG = True
